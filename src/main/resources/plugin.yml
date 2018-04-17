@@ -1,0 +1,11 @@
+name: Pillars
+version: 0.1
+author: ProgMiner
+
+main: by.progminer.Pillars.Main
+
+commands:
+    pillars:
+        description: Command for managing the Pillars plugin
+        usage: /pillars <subcommand> [args]
+        aliases: p
