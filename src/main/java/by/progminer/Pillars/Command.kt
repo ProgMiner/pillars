@@ -8,10 +8,10 @@ import org.bukkit.plugin.Plugin
 class Command(private val plugin: Plugin): TabExecutor {
 
     override fun onCommand(sender: CommandSender?, command: Command?, label: String?, args: Array <out String> ?): Boolean {
-        return true
+        TODO()
     }
 
     override fun onTabComplete(sender: CommandSender?, command: Command?, alias: String?, args: Array <out String> ?): MutableList <String> {
-        return mutableListOf()
+        TODO()
     }
 }

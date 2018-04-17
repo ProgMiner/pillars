@@ -23,8 +23,4 @@ class Main: JavaPlugin() {
             cmd.executor = executor
         }
     }
-
-    override fun onDisable() {
-        logger.info("Test")
-    }
 }
