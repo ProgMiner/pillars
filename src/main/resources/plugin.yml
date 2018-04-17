@@ -6,6 +6,6 @@ main: by.progminer.Pillars.Main
 
 commands:
     pillars:
-        description: Command for managing the Pillars plugin
+        description: "Command for managing the Pillars plugin. You can use Tab or /pillars help for list subcommands"
         usage: /pillars <subcommand> [args]
         aliases: p
