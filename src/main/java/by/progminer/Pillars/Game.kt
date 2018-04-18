@@ -9,8 +9,8 @@ import org.bukkit.plugin.Plugin
 class Game(
         val plugin: Plugin,
         val options: Options,
-        val blocks: kotlin.collections.Map <Player, Block>,
-        val map: Map
+        val blocks: Map<Player, Block>,
+        val map: GameMap
 ) {
     enum class State {
         LOBBY,
@@ -29,7 +29,7 @@ class Game(
     var state = State.LOBBY
         private set
 
-    val collectedBlocks: MutableMap <Int, Player> = mutableMapOf()
+    val collectedBlocks: MutableMap<Int, Player> = mutableMapOf()
 
     /**
      * Next timer endpoint
@@ -126,6 +126,8 @@ class Game(
                         player.inventory.forEach {
                             if (it.type == block.type) {
                                 blocksCount += it.amount
+
+                                @Suppress("LABEL_NAME_CLASH")
                                 return@forEach
                             }
                         }
