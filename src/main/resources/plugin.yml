@@ -6,15 +6,5 @@ main: by.progminer.Pillars.Main
 
 commands:
     pillars:
-        description: "Command for managing the Pillars plugin"
-        usage: |
-            /pillars <subcommand: map|game> [args]
-
-            /pillars map <list|init> [args]
-            /pillars map list
-            /pillars map init <name> [author]
-
-            /pillars game <list|start> [players]
-            /pillars game list [players]
-            /pillars game start [map name] [players]
-        aliases: p
+        description: Pillars plugin management
+        usage: /pillars <subcmd> [<args>]
