@@ -1,8 +1,8 @@
-package by.progminer.Pillars.Utility
+package by.progminer.Pillars.Utility.Command
 
 import org.bukkit.command.*
 
-abstract class NodeTabExecutor(val commands: Map <String, TabExecutor>): TabExecutor {
+open class NodeTabExecutor(protected var commands: Map <String, TabExecutor>): TabExecutor {
     companion object {
         fun cleanEmptyArgs(args: Array<String>): Array<String> {
             val ret = mutableListOf<String>()
@@ -23,11 +23,10 @@ abstract class NodeTabExecutor(val commands: Map <String, TabExecutor>): TabExec
         }
     }
 
-    private val cmds = commands.keys.toList()
-
-    constructor(commands: List<String>): this(commands.associate {
-        Pair(it, BaseTabExecutor(CommandExecutor { _, _, _, _ -> throw UnsupportedOperationException() }))
-    })
+    constructor(
+            commands: List<String>,
+            child: TabExecutor = BaseTabExecutor(CommandExecutor { _, _, _, _ -> throw UnsupportedOperationException() })
+    ): this(commands.associate { Pair(it, child) })
 
     override fun onCommand(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): Boolean {
         val args = cleanEmptyArgs(argsArray)
@@ -52,7 +51,7 @@ abstract class NodeTabExecutor(val commands: Map <String, TabExecutor>): TabExec
         val args = cleanEmptyArgs(argsArray)
 
         if (args.isEmpty()) {
-            return cmds
+            return commands.keys.toList()
         }
 
         val subcmdAlias = "$alias ${args[0]}"
@@ -65,7 +64,7 @@ abstract class NodeTabExecutor(val commands: Map <String, TabExecutor>): TabExec
                 return completer.onTabComplete(sender, command, subcmdAlias, subcmdArgs)
             }
 
-            if (cmd.startsWith(args[0])) {
+            if (cmd.startsWith(args[0]) && args.size == 1) {
                 similar.add(cmd)
             }
         }

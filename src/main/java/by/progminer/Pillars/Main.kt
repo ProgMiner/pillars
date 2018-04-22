@@ -1,7 +1,6 @@
 package by.progminer.Pillars
 
 import by.progminer.Pillars.Command.PillarsCommand
-import by.progminer.Pillars.Utility.MapContainer
 import org.bukkit.configuration.file.FileConfiguration
 import org.bukkit.configuration.serialization.ConfigurationSerialization
 import org.bukkit.plugin.java.JavaPlugin
@@ -18,15 +17,22 @@ class Main: JavaPlugin() {
     lateinit var configFile: FileConfiguration
         private set
 
-    lateinit var mapContainer: MapContainer
+    lateinit var mapStorage: MapStorage
         private set
 
+    val gameManager = GameManager()
+
     override fun onLoad() {
+        // Register serializable classes
+        ConfigurationSerialization.registerClass(GameMap::class.java)
+
         pluginDir = dataFolder
         if (!pluginDir.exists()) {
             pluginDir.mkdirs()
         }
+    }
 
+    override fun onEnable() {
         configFile = config
         saveDefaultConfig()
 
@@ -35,10 +41,8 @@ class Main: JavaPlugin() {
             saveResource(MAPS_FILE, false)
         }
 
-        mapContainer = MapContainer.fromFile(mapsFile)
-    }
+        mapStorage = MapStorage.fromFile(mapsFile)
 
-    override fun onEnable() {
         run {
             // Setting executor for game command
             val cmd = getCommand("pillars")
@@ -46,8 +50,9 @@ class Main: JavaPlugin() {
             cmd.tabCompleter = executor
             cmd.executor = executor
         }
+    }
 
-        // Register serializable classes
-        ConfigurationSerialization.registerClass(GameMap::class.java)
+    override fun onDisable() {
+        mapStorage.saveToFile(File(pluginDir, MAPS_FILE))
     }
 }

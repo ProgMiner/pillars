@@ -1,17 +1,17 @@
 package by.progminer.Pillars
 
+import org.bukkit.ChatColor
 import org.bukkit.Material
-import org.bukkit.block.Block
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
-import org.bukkit.plugin.Plugin
+import org.bukkit.scheduler.BukkitRunnable
 
 class Game(
-        val plugin: Plugin,
+        private val main: Main,
         val options: Options,
-        val blocks: Map<Player, Block>,
+        val blocks: Map<Player, Material>,
         val map: GameMap
-) {
+): BukkitRunnable() {
     enum class State {
         LOBBY,
         HIDING_START,  HIDING,  HIDING_END,
@@ -20,10 +20,10 @@ class Game(
     }
 
     data class Options(
-            val gameDuration: Long,
-            val startDuration: Long,
-            val endDuration: Long,
-            val blocksAmount: Int
+            val gameDuration: Long = 300000,
+            val startDuration: Long = 5000,
+            val endDuration: Long = 300000,
+            val blocksAmount: Int = 12
     )
 
     var state = State.LOBBY
@@ -37,13 +37,57 @@ class Game(
     var timer = 0L
         private set
 
-    fun start() {
+    var ended = false
+        private set
+
+    lateinit var manager: GameManager
+        private set
+
+    init {
+        blocks.forEach { _, block ->
+            if (!block.isBlock) {
+                throw IllegalArgumentException("One or more blocks isn't a block")
+            }
+        }
+    }
+
+    fun start(manager: GameManager? = null, after: Long = 0L, period: Long = 1L) {
+        checkStarted()
+        if (manager != null) {
+            this.manager = manager
+        }
+
+        blocks.keys.forEach {
+            it.canPickupItems = false
+        }
+
         // TODO Preparing before starting
 
+        runTaskTimer(main, after, period)
         switchState(State.HIDING_START)
     }
 
-    fun tick() {
+    fun stop() {
+        blocks.keys.forEach {
+            it.canPickupItems = true
+        }
+
+        // TODO Preparing before stopping
+
+        switchState(State.LOBBY)
+    }
+
+    fun checkStarted() {
+        if (state != State.LOBBY) {
+            throw IllegalStateException("Game already started")
+        }
+    }
+
+    fun tick(): Boolean {
+        if (ended) {
+            return true
+        }
+
         when (state) {
             State.HIDING_START -> switchStateIfTimerOut(State.HIDING)
 
@@ -62,6 +106,18 @@ class Game(
             State.PILLARS_END -> switchStateIfTimerOut(State.LOBBY)
 
             else -> {}
+        }
+
+        return ended
+    }
+
+    override fun run() {
+        if (tick()) {
+            cancel()
+
+            if (this::manager.isInitialized) {
+                manager.stopGame(this)
+            }
         }
     }
 
@@ -89,15 +145,21 @@ class Game(
 
                     // Hiding players
                     blocks.forEach { hidingPlayer, _ ->
-                        hidingPlayer.hidePlayer(plugin, player)
+                        hidingPlayer.hidePlayer(main, player)
                     }
 
                     // Giving blocks and pickaxe
-                    player.inventory.addItem(ItemStack(block.type, options.blocksAmount), pickaxe)
+                    player.inventory.addItem(ItemStack(block, options.blocksAmount), pickaxe)
                 }
 
                 // Setting timer for game
                 timer = System.currentTimeMillis() + options.gameDuration
+            }
+
+            State.HIDING_END -> {
+                blocks.keys.forEach {
+                    it.sendMessage("${ChatColor.RED}Time is over!")
+                }
             }
 
             State.SEARCH -> {
@@ -123,11 +185,15 @@ class Game(
                     var blocksCount = 0
 
                     blocks.forEach { _, block ->
+                        @Suppress("LABEL_NAME_CLASH")
                         player.inventory.forEach {
-                            if (it.type == block.type) {
+                            if (it == null) {
+                                return@forEach
+                            }
+
+                            if (it.type == block) {
                                 blocksCount += it.amount
 
-                                @Suppress("LABEL_NAME_CLASH")
                                 return@forEach
                             }
                         }
@@ -140,7 +206,7 @@ class Game(
 
                     // Showing players
                     blocks.forEach { showingPlayer, _ ->
-                        showingPlayer.showPlayer(plugin, player)
+                        showingPlayer.showPlayer(main, player)
                     }
                 }
 
@@ -159,12 +225,15 @@ class Game(
                 timer = System.currentTimeMillis() + options.endDuration
             }
 
-            State.LOBBY ->
+            State.LOBBY -> {
                 blocks.forEach { player, _ ->
 
                     // Teleporting players to lobby
                     player.teleport(map.lobby)
                 }
+
+                ended = true
+            }
 
             else -> {}
         }
@@ -179,16 +248,16 @@ class Game(
     }
 
     private fun isEverybodyHasNotBlocks(): Boolean {
-        var hasBlocks = false
+        for ((player, _) in blocks) {
+            for ((_, block) in blocks) {
+                if (player.inventory.contains(block)) {
+                    return false
 
-        for (player in blocks) {
-            if (player.key.inventory.contains(player.value.type)) {
-                hasBlocks = true
-                break
+                }
             }
         }
 
-        return hasBlocks
+        return true
     }
 
     private fun switchStateIfEverybodyHasNotBlocks(newState: State) {

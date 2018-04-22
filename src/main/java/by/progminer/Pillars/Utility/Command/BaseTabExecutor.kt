@@ -1,4 +1,4 @@
-package by.progminer.Pillars.Utility
+package by.progminer.Pillars.Utility.Command
 
 import org.bukkit.command.Command
 import org.bukkit.command.CommandExecutor
@@ -9,5 +9,5 @@ open class BaseTabExecutor(executor: CommandExecutor): TabExecutor, CommandExecu
     override fun onTabComplete(p0: CommandSender?, p1: Command?, p2: String?, p3: Array<String>) =
             emptyList <String> ()
 
-    constructor(): this(CommandExecutor { _, _, _, _ -> false })
+    constructor(): this(CommandExecutor { _, _, _, _ -> true })
 }
