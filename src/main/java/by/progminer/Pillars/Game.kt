@@ -1,22 +1,238 @@
 package by.progminer.Pillars
 
-import org.bukkit.ChatColor
+import org.bukkit.Color
+import org.bukkit.Location
 import org.bukkit.Material
-import org.bukkit.entity.Player
+import org.bukkit.ChatColor
+import org.bukkit.FireworkEffect
+import org.bukkit.block.BlockState
+import org.bukkit.boss.BarColor
+import org.bukkit.boss.BarStyle
 import org.bukkit.inventory.ItemStack
+import org.bukkit.entity.Player
+import org.bukkit.entity.Firework
+import org.bukkit.event.*
+import org.bukkit.event.block.Action
+import org.bukkit.event.block.BlockBreakEvent
+import org.bukkit.event.block.BlockPlaceEvent
+import org.bukkit.event.block.BlockDamageEvent
+import org.bukkit.event.entity.EntityDamageByEntityEvent
+import org.bukkit.event.entity.EntityDamageEvent
+import org.bukkit.event.entity.FoodLevelChangeEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
+import org.bukkit.event.inventory.InventoryType
+import org.bukkit.event.player.*
+import org.bukkit.event.vehicle.VehicleCollisionEvent
 import org.bukkit.scheduler.BukkitRunnable
+import java.util.*
 
+@Suppress("unused", "MemberVisibilityCanBePrivate")
 class Game(
         private val main: Main,
         val options: Options,
-        val blocks: Map<Player, Material>,
         val map: GameMap
-): BukkitRunnable() {
-    enum class State {
-        LOBBY,
-        HIDING_START,  HIDING,  HIDING_END,
-        SEARCH_START,  SEARCH,
-        PILLARS_START, PILLARS, PILLARS_END
+): BukkitRunnable(), Listener {
+    enum class State(
+            val tick: Game.() -> Unit = {},
+            val start: Game.() -> Unit = {},
+            val rejoin: Game.(Player) -> Unit = {}
+    ) {
+        NOT_STARTED,
+
+        HIDING_START({
+            switchStateIfTimerOut(State.HIDING)
+        }, {
+            _players.forEach { player ->
+
+                // Teleporting players to start point
+                player.teleport(map.start)
+
+                player.gameMode = org.bukkit.GameMode.SURVIVAL
+                player.canPickupItems = false
+                player.isCollidable = false
+            }
+
+            // Setting timer for waiting
+            timer = options.startDuration
+        }, {
+            it.gameMode = org.bukkit.GameMode.SURVIVAL
+            it.canPickupItems = false
+            it.isCollidable = false
+        }),
+        HIDING({
+            run {
+                for (player in _players) {
+                    if (placedBlocks[player.name]?.size ?: 0 < options.blocksAmount) {
+                        return@run
+                    }
+                }
+
+                state = State.SEARCH_START
+            }
+
+            switchStateIfTimerOut(State.HIDING_END)
+        }, {
+            // TODO Giving an effects
+
+            _players.forEach { player ->
+
+                // Hiding players
+                _players.forEach { hidingPlayer ->
+                    hidingPlayer.hidePlayer(main, player)
+                }
+
+                // Giving blocks
+                player.inventory.addItem(ItemStack(blocks[player.name]!!, options.blocksAmount))
+            }
+
+            // Setting timer for game
+            timer = options.gameDuration
+        }),
+        HIDING_END({
+            run {
+                players.forEach {
+                    if (placedBlocks[it.name]?.size ?: 0 < options.blocksAmount) {
+                        return@run
+                    }
+                }
+
+                state = State.SEARCH_START
+            }
+        }, {
+            _players.forEach {
+                it.sendMessage("${ChatColor.RED}Time is over!")
+            }
+        }),
+
+        SEARCH_START({
+            switchStateIfTimerOut(State.SEARCH)
+        }, {
+            _players.forEach { player ->
+
+                // Teleporting players to start point
+                player.teleport(map.start)
+            }
+
+            // Setting timer for waiting
+            timer = options.startDuration
+        }),
+        SEARCH({
+            switchStateIfTimerOut(State.PILLARS_START)
+        }, {
+
+            // Setting timer for game
+            timer = options.gameDuration
+        }),
+
+        PILLARS_START({
+            switchStateIfTimerOut(State.PILLARS)
+        }, {
+            _players.forEach { player ->
+
+                // Teleporting players to pillars point
+                player.teleport(map.pillars)
+
+                // Showing players
+                _players.forEach { showingPlayer ->
+                    showingPlayer.showPlayer(main, player)
+                }
+            }
+
+            topPlayers = run {
+                val unsortedSets = mutableMapOf<Int, MutableSet<String>>()
+                _collectedBlocks.forEach { player, count ->
+                    if (count !in unsortedSets) {
+                        unsortedSets[count] = mutableSetOf(player)
+                    } else {
+                        unsortedSets[count]!!.add(player)
+                    }
+                }
+
+                val sets = unsortedSets.toSortedMap(Comparator { a, b -> a - b })
+
+                val ret = mutableListOf<String>()
+                sets.forEach { _, set ->
+                    set.forEach {
+                        ret.add(it)
+                    }
+                }
+
+                return@run ret.toList()
+            }
+
+            // Setting timer for waiting
+            timer = options.startDuration
+        }),
+        PILLARS({
+            run {
+                players.forEach {
+                    if (placedBlocks[it.name]?.size ?: 0 != _collectedBlocks[it.name] ?: 0) {
+                        return@run
+                    }
+                }
+
+                state = State.PILLARS_END
+            }
+        }, {
+            placedBlocks.clear()
+
+            _players.forEach {
+                it.sendMessage("${ChatColor.RED}Time is over!")
+            }
+        }),
+        PILLARS_END({
+            if (_players.isEmpty()) {
+                state = State.ENDED
+            }
+
+            switchStateIfTimerOut(State.ENDED)
+        }, {
+            val chat = mutableListOf("Game finished! Top players is:")
+
+            topPlayers.slice(0 until minOf(3, topPlayers.size)).forEachIndexed { i, it ->
+                val player = main.server.getPlayerExact(it)!!
+
+                chat.add("${i + 1}. ${ChatColor.UNDERLINE}${player.playerListName}${ChatColor.RESET} - ${_collectedBlocks[player.name]} blocks")
+
+                val firework = player.world.spawn(player.location.add(.0, 2.0, .0), Firework::class.java)
+                firework.fireworkMeta.addEffect(
+                        FireworkEffect.builder()
+                                .with(FireworkEffect.Type.STAR)
+                                .withColor(Color.WHITE)
+                                .build()
+                )
+                firework.fireworkMeta.power = 9 - i * 3
+            }
+
+            val chatArray = chat.toTypedArray()
+            _players.forEach {
+                it.sendMessage(chatArray)
+            }
+
+            // Setting timer for waiting
+            timer = options.endDuration
+        }),
+
+        ENDED(start = {
+            _players.forEach { player ->
+
+                // Teleporting players to lobby
+                player.teleport(map.lobby)
+
+                player.canPickupItems = true
+                player.isCollidable = true
+            }
+
+            blocksLog.forEach { location, block ->
+                location.block.type = block.type
+                location.block.data = block.data.data
+            }
+
+            bossBar.isVisible = false
+
+            cancel()
+            HandlerList.unregisterAll(this)
+        })
     }
 
     data class Options(
@@ -26,243 +242,395 @@ class Game(
             val blocksAmount: Int = 12
     )
 
-    var state = State.LOBBY
-        private set
+    // Public variables
 
-    val collectedBlocks: MutableMap<Int, Player> = mutableMapOf()
+    val collectedBlocks: Map<String, Int>
+        get() = _collectedBlocks.toMap()
 
-    /**
-     * Next timer endpoint
-     */
+    lateinit var topPlayers: List<String>
+
+    val players: Set<Player>
+        get() = _players.toSet()
+
+    val blocks: Map<String, Material>
+        get() = _blocks.toMap()
+
+    val offlinePlayers: Set<String>
+        get() = _offlinePlayers.toSet()
+
     var timer = 0L
-        private set
+        get() = field - System.currentTimeMillis()
+        private set(value) {
+            field = System.currentTimeMillis() + value
+            timerFull = value
+        }
 
-    var ended = false
-        private set
+    var state = State.NOT_STARTED
+        private set(value) {
+            if (value == State.NOT_STARTED) {
+                return
+            }
 
-    lateinit var manager: GameManager
-        private set
+            value.start(this)
+
+            field = value
+        }
+
+    // Private variables
+
+    private var timerFull = 0L
+
+    private var bossBar = main.server.createBossBar("Pillars", BarColor.WHITE, BarStyle.SOLID)
+
+    private val placedBlocks = mutableMapOf<String, MutableSet<Location>>()
+
+    private val blocksLog = mutableMapOf<Location, BlockState>()
+
+    private val _collectedBlocks = mutableMapOf<String, Int>()
+
+    private val _blocks = mutableMapOf<String, Material>()
+
+    private val _offlinePlayers = mutableSetOf<String>()
+
+    private val _players = mutableSetOf<Player>()
+
+    // Public methods
 
     init {
-        blocks.forEach { _, block ->
-            if (!block.isBlock) {
-                throw IllegalArgumentException("One or more blocks isn't a block")
-            }
-        }
+        bossBar.isVisible = false
     }
 
-    fun start(manager: GameManager? = null, after: Long = 0L, period: Long = 1L) {
-        checkStarted()
-        if (manager != null) {
-            this.manager = manager
+    fun start() {
+        _players.forEach {
+            if (!it.isOnline) {
+                _players.remove(it)
+            }
         }
 
-        blocks.keys.forEach {
-            it.canPickupItems = false
+        if (_players.size < 2) {
+            throw UnsupportedOperationException("The number of players is less than 2")
         }
 
-        // TODO Preparing before starting
+        main.server.pluginManager.registerEvents(this, main)
+        state = State.HIDING_START
+        runTaskTimer(main, 0, 1)
+    }
 
-        runTaskTimer(main, after, period)
-        switchState(State.HIDING_START)
+    fun skipCurrentState() {
+        state = State.values()[state.ordinal + 1]
     }
 
     fun stop() {
-        blocks.keys.forEach {
-            it.canPickupItems = true
-        }
-
-        // TODO Preparing before stopping
-
-        switchState(State.LOBBY)
+        state = State.ENDED
     }
 
-    fun checkStarted() {
-        if (state != State.LOBBY) {
-            throw IllegalStateException("Game already started")
+    fun joinPlayer(player: Player, block: Material) {
+        if (!player.isOnline) {
+            throw IllegalArgumentException("Player is not online")
+        }
+
+        main.gameContainer.forEach {
+            if (it._players.contains(player)) {
+                throw IllegalArgumentException("Player already plays another game")
+            }
+        }
+
+        if (!block.isBlock || !block.isSolid || block.hasGravity()) {
+            throw IllegalArgumentException("Block must be solid non-falling block")
+        }
+
+        if (block in _blocks.values) {
+            throw IllegalArgumentException("This block is already busy")
+        }
+
+        _players.add(player)
+        bossBar.addPlayer(player)
+
+        _blocks[player.name] = block
+        _collectedBlocks[player.name] = 0
+    }
+
+    fun detachPlayer(player: Player) {
+        _players.remove(player)
+        bossBar.removePlayer(player)
+        _offlinePlayers.remove(player.name)
+
+        _blocks.remove(player.name)
+        _collectedBlocks.remove(player.name)
+    }
+
+    fun rejoinPlayer(player: Player, force: Boolean = false) {
+        if (player.name !in offlinePlayers && !force) {
+            throw IllegalArgumentException("The player is not offline")
+        }
+
+        _offlinePlayers.remove(player.name)
+        _players.add(player)
+
+        bossBar.addPlayer(player)
+
+        state.rejoin(this, player)
+    }
+
+    // Event handlers
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun on(event: PlayerQuitEvent) {
+        if (event.player !in _players) {
+            return
+        }
+
+        _offlinePlayers.add(event.player.name)
+        _players.remove(event.player)
+
+        if (_players.size < 2) {
+            _players.forEach {
+                it.sendMessage("${ChatColor.RED}Too few players")
+            }
+
+            stop()
         }
     }
 
-    fun tick(): Boolean {
-        if (ended) {
-            return true
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: PlayerMoveEvent) {
+        if (event.player !in players) {
+            return
         }
 
         when (state) {
-            State.HIDING_START -> switchStateIfTimerOut(State.HIDING)
+            State.HIDING_START, State.HIDING_END, State.SEARCH_START, State.PILLARS_START -> {}
 
-            State.HIDING -> switchStateIfTimerOut(State.HIDING_END)
-
-            State.HIDING_END -> switchStateIfEverybodyHasNotBlocks(State.SEARCH_START)
-
-            State.SEARCH_START -> switchStateIfTimerOut(State.SEARCH)
-
-            State.SEARCH -> switchStateIfTimerOut(State.PILLARS_START)
-
-            State.PILLARS_START -> switchStateIfTimerOut(State.PILLARS)
-
-            State.PILLARS -> switchStateIfEverybodyHasNotBlocks(State.PILLARS_END)
-
-            State.PILLARS_END -> switchStateIfTimerOut(State.LOBBY)
-
-            else -> {}
+            else ->
+                return
         }
 
-        return ended
-    }
-
-    override fun run() {
-        if (tick()) {
-            cancel()
-
-            if (this::manager.isInitialized) {
-                manager.stopGame(this)
-            }
+        if (
+                event.from.blockX != event.to.blockX ||
+                event.from.blockZ != event.to.blockZ
+        ) {
+            event.player.teleport(Location(
+                    event.from.world,
+                    event.from.x,
+                    event.to.y,
+                    event.from.z,
+                    event.to.yaw,
+                    event.to.pitch
+            ))
         }
     }
 
-    private fun switchState(newState: State) {
-        when (newState) {
-            State.HIDING_START, State.SEARCH_START -> {
-                blocks.forEach { player, _ ->
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: BlockDamageEvent) {
+        if (event.player !in players) {
+            return
+        }
 
-                    // Teleporting players to start point
-                    player.teleport(map.start)
+        when (state) {
+            State.HIDING, State.PILLARS ->
+                if (event.block.location in placedBlocks[event.player.name] ?: emptySet<Location>()) {
+                    placedBlocks[event.player.name]!!.remove(event.block.location)
+                    event.player.inventory.addItem(ItemStack(event.block.type))
+                    event.block.type = Material.AIR
+                } else {
+                    event.isCancelled = true
                 }
-
-                // Setting timer for waiting
-                timer = System.currentTimeMillis() + options.startDuration
-            }
-
-            State.HIDING -> {
-                // TODO Giving an effects
-
-                // TODO Move to settings
-                // TODO Add adventure mode options
-                val pickaxe = ItemStack(Material.DIAMOND_PICKAXE)
-
-                blocks.forEach { player, block ->
-
-                    // Hiding players
-                    blocks.forEach { hidingPlayer, _ ->
-                        hidingPlayer.hidePlayer(main, player)
-                    }
-
-                    // Giving blocks and pickaxe
-                    player.inventory.addItem(ItemStack(block, options.blocksAmount), pickaxe)
-                }
-
-                // Setting timer for game
-                timer = System.currentTimeMillis() + options.gameDuration
-            }
-
-            State.HIDING_END -> {
-                blocks.keys.forEach {
-                    it.sendMessage("${ChatColor.RED}Time is over!")
-                }
-            }
 
             State.SEARCH -> {
+                event.isCancelled = true
 
-                // TODO Move to settings
-                // TODO Add adventure mode options
-                val pickaxe = ItemStack(Material.DIAMOND_PICKAXE)
-
-                blocks.forEach { player, _ ->
-
-                    // Giving pickaxe
-                    player.inventory.addItem(pickaxe)
+                if (event.block.type == _blocks[event.player.name]) {
+                    return
                 }
 
-                // Setting timer for game
-                timer = System.currentTimeMillis() + options.gameDuration
-            }
+                for ((_, blocks) in placedBlocks) {
+                    if (event.block.location in blocks) {
+                        _collectedBlocks[event.player.name] = _collectedBlocks[event.player.name]!! + 1
 
-            State.PILLARS_START -> {
-                blocks.forEach { player, _ ->
-
-                    // Counting all collected blocks
-                    var blocksCount = 0
-
-                    blocks.forEach { _, block ->
-                        @Suppress("LABEL_NAME_CLASH")
-                        player.inventory.forEach {
-                            if (it == null) {
-                                return@forEach
-                            }
-
-                            if (it.type == block) {
-                                blocksCount += it.amount
-
-                                return@forEach
-                            }
-                        }
-                    }
-
-                    collectedBlocks[blocksCount] = player
-
-                    // Teleporting players to pillars point
-                    player.teleport(map.pillars)
-
-                    // Showing players
-                    blocks.forEach { showingPlayer, _ ->
-                        showingPlayer.showPlayer(main, player)
+                        event.player.inventory.addItem(ItemStack(event.block.type))
+                        event.block.type = Material.AIR
+                        event.isCancelled = false
+                        break
                     }
                 }
-
-                // Setting timer for waiting
-                timer = System.currentTimeMillis() + options.startDuration
             }
 
-            State.PILLARS -> {
+            else ->
+                onPlayerFreeze(event, event.player)
+        }
+    }
 
-                // TODO Make blocks placeable for adventure mode
-            }
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: BlockPlaceEvent) {
+        if (event.player !in players) {
+            return
+        }
 
-            State.PILLARS_END -> {
+        when (state) {
+            State.HIDING, State.HIDING_END, State.SEARCH, State.PILLARS ->
+                if (
+                        state != State.PILLARS && event.block.type == _blocks[event.player.name] ||
+                        state == State.PILLARS && event.block.type != _blocks[event.player.name]
+                ) {
+                    if (state == State.PILLARS && (
+                            event.block.location.blockX != event.player.location.blockX ||
+                            event.block.location.blockY != event.player.location.blockY - 1 ||
+                            event.block.location.blockZ != event.player.location.blockZ
+                    )) {
+                        event.isCancelled = true
+                        return
+                    }
 
-                // Setting timer for ending
-                timer = System.currentTimeMillis() + options.endDuration
-            }
+                    if (event.player.name !in placedBlocks.keys) {
+                        placedBlocks[event.player.name] = mutableSetOf()
+                    }
 
-            State.LOBBY -> {
-                blocks.forEach { player, _ ->
-
-                    // Teleporting players to lobby
-                    player.teleport(map.lobby)
+                    placedBlocks[event.player.name]!!.add(event.block.location)
+                } else {
+                    event.isCancelled = true
                 }
 
-                ended = true
+            else ->
+                onPlayerFreeze(event, event.player)
+        }
+
+        if (!event.isCancelled) {
+            blocksLog[event.block.location] = event.blockReplacedState
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: BlockBreakEvent) {
+        if (event.player !in _players) {
+            return
+        }
+
+        blocksLog[event.block.location] = event.block.state
+
+        event.isDropItems = false
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: PlayerDropItemEvent) {
+        if (event.player !in _players) {
+            return
+        }
+
+        event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: FoodLevelChangeEvent) {
+        if (event.entity !in _players) {
+            return
+        }
+
+        event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: InventoryOpenEvent) {
+        if (event.player !in _players) {
+            return
+        }
+
+        if (event.inventory.type != InventoryType.PLAYER) {
+            event.isCancelled = true
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: PlayerGameModeChangeEvent) {
+        if (event.player !in _players) {
+            return
+        }
+
+        event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: PlayerInteractEvent) {
+        if (event.player !in _players) {
+            return
+        }
+
+        if (
+                event.action == Action.LEFT_CLICK_BLOCK ||
+                event.action == Action.RIGHT_CLICK_BLOCK
+        ) {
+            return
+        }
+
+        event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: EntityDamageEvent) {
+        if (event.entity !in _players) {
+            return
+        }
+
+        event.isCancelled = true
+    }
+
+    // Overrides
+
+    override fun run() {
+        state.tick(this)
+
+        val timer = timer
+        if (timer >= 0) {
+            val calendar = Calendar.getInstance()
+            calendar.timeInMillis = timer
+
+            // TODO Format time
+            bossBar.progress = 1 - timer.toDouble() / timerFull
+            bossBar.title = "${state.name} since ${calendar[Calendar.MINUTE]}:${calendar[Calendar.SECOND]}/${calendar[Calendar.MILLISECOND]}"
+
+            bossBar.color = when (bossBar.progress) {
+                in 0.0..0.35 ->
+                    BarColor.GREEN
+
+                in 0.35..0.8 ->
+                    BarColor.YELLOW
+
+                in 0.8..1.0 ->
+                    BarColor.RED
+
+                else ->
+                    BarColor.WHITE
             }
+
+            bossBar.isVisible = true
+        } else {
+            bossBar.isVisible = false
+        }
+    }
+
+    // Private methods
+
+    private fun <T> onPlayerFreeze(event: T) where
+            T: Cancellable,
+            T: PlayerEvent
+    = onPlayerFreeze(event, event.player)
+
+
+    private fun onPlayerFreeze(event: Cancellable, player: Player) {
+        if (player !in _players) {
+            return
+        }
+
+        when (state) {
+            State.HIDING_START, State.HIDING_END, State.PILLARS_START, State.PILLARS_END, State.SEARCH_START ->
+                event.isCancelled = true
 
             else -> {}
         }
-
-        state = newState
     }
 
     private fun switchStateIfTimerOut(newState: State) {
-        if (timer <= System.currentTimeMillis()) {
-            switchState(newState)
-        }
-    }
-
-    private fun isEverybodyHasNotBlocks(): Boolean {
-        for ((player, _) in blocks) {
-            for ((_, block) in blocks) {
-                if (player.inventory.contains(block)) {
-                    return false
-
-                }
-            }
-        }
-
-        return true
-    }
-
-    private fun switchStateIfEverybodyHasNotBlocks(newState: State) {
-        if (isEverybodyHasNotBlocks()) {
-            switchState(newState)
+        if (timer <= 0) {
+            state = newState
         }
     }
 }

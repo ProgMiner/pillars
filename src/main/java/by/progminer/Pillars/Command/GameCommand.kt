@@ -2,23 +2,26 @@ package by.progminer.Pillars.Command
 
 import by.progminer.Pillars.Game
 import by.progminer.Pillars.Main
-import by.progminer.Pillars.Utility.*
-import by.progminer.Pillars.Utility.Command.InfinitePlayersTabExecutor
-import by.progminer.Pillars.Utility.Command.MapsTabExecutor
-import by.progminer.Pillars.Utility.Command.NodeTabExecutor
+import by.progminer.Pillars.Utility.Command.*
 import org.bukkit.ChatColor
+import org.bukkit.GameMode
 import org.bukkit.Material
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
+import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
-import org.bukkit.event.player.AsyncPlayerChatEvent
+import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.InventoryCloseEvent
+import org.bukkit.event.inventory.InventoryType
 import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.inventory.ItemStack
 import org.bukkit.scheduler.BukkitRunnable
 import java.util.*
 
+@Suppress("unused")
 class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
         "list" to object: InfinitePlayersTabExecutor(main.server) {
 
@@ -42,40 +45,30 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
                     sender.sendMessage(badPlayers.joinToString(prefix = "${ChatColor.RED}Players not found: "))
                 }
 
-                if (players.isEmpty()) {
-                    players.addAll(main.gameManager.getPlayers())
+                val games = if (players.isEmpty()) {
+                    main.gameContainer
+                } else {
+                    main.gameContainer.filter {
+                        for (player in players) {
+                            if (player in it.players) {
+                                players.remove(player)
+                                return@filter true
+                            }
+                        }
+
+                        return@filter false
+                    }.toSet()
                 }
 
-                main.gameManager.forEach {
-                    var hasPlayer = false
-                    for (player in players) {
-                        if (it.blocks.containsKey(player)) {
-                            players.remove(player)
-                            hasPlayer = true
-                            break
-                        }
-                    }
-
-                    if (!hasPlayer) {
-                        return@forEach
-                    }
-
-                    val s = StringBuilder(it.state.name)
-                            .append(" at ")
-                            .append(it.map.start.toHumanReadable())
-                            .append(" still ")
-                            .append(it.timer - System.currentTimeMillis())
-                            .append("ms: ")
-                            .append(it.blocks.keys.joinToString())
-
-                    ret.add(s.toString())
+                games.forEachIndexed { i, it ->
+                    ret.add(it.blocks.keys.joinToString(prefix = "${i + 1}. Game at state ${it.state.name} still ${it.timer} ms with "))
                 }
 
                 sender.sendMessage(ret.toTypedArray())
                 return true
             }
         },
-        "start" to object: MapsTabExecutor(main.mapStorage, InfinitePlayersTabExecutor(main.server)) {
+        "start" to object: MapsTabExecutor(main.mapStorage, CustomTabExecutor(InfinitePlayersTabExecutor(main.server))) {
 
             override fun onCommand(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): Boolean {
                 val args = cleanEmptyArgs(argsArray)
@@ -112,7 +105,31 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
 
                     if (player != null) {
                         players.add(player)
-                        player.sendMessage("Write name of your block now")
+
+                        player.sendMessage("Select your block now")
+
+                        // TODO Make inventory configurable
+                        val inventory = main.server.createInventory(player, InventoryType.PLAYER, "Select your block now")
+                        inventory.contents = arrayOf(
+                                ItemStack(Material.WHITE_GLAZED_TERRACOTTA),
+                                ItemStack(Material.ORANGE_GLAZED_TERRACOTTA),
+                                ItemStack(Material.MAGENTA_GLAZED_TERRACOTTA),
+                                ItemStack(Material.LIGHT_BLUE_GLAZED_TERRACOTTA),
+                                ItemStack(Material.YELLOW_GLAZED_TERRACOTTA),
+                                ItemStack(Material.LIME_GLAZED_TERRACOTTA),
+                                ItemStack(Material.PINK_GLAZED_TERRACOTTA),
+                                ItemStack(Material.GRAY_GLAZED_TERRACOTTA),
+                                ItemStack(Material.SILVER_GLAZED_TERRACOTTA),
+                                ItemStack(Material.CYAN_GLAZED_TERRACOTTA),
+                                ItemStack(Material.PURPLE_GLAZED_TERRACOTTA),
+                                ItemStack(Material.BLUE_GLAZED_TERRACOTTA),
+                                ItemStack(Material.BROWN_GLAZED_TERRACOTTA),
+                                ItemStack(Material.GREEN_GLAZED_TERRACOTTA),
+                                ItemStack(Material.RED_GLAZED_TERRACOTTA),
+                                ItemStack(Material.BLACK_GLAZED_TERRACOTTA)
+                        )
+
+                        player.openInventory(inventory)
                     } else {
                         badPlayers.add(it)
                     }
@@ -122,64 +139,166 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
                     sender.sendMessage(badPlayers.joinToString(prefix = "${ChatColor.RED}Players not found: "))
                 }
 
-                if (players.size < 2) {
-                    sender.sendMessage("${ChatColor.RED}Too few players")
+                main.gameContainer.forEach {
+                    players.forEach {player ->
+                        if (it.players.contains(player)) {
+                            sender.sendMessage("${ChatColor.RED}Player ${player.name} already plays")
+                            return true
+                        }
+                    }
                 }
 
-                val blocks = mutableMapOf<Player, Material>()
-                main.server.pluginManager.registerEvents(object: Listener {
-                    @EventHandler(ignoreCancelled = false)
-                    fun onAsyncPlayerChat(event: AsyncPlayerChatEvent) {
-                        if (event.player !in players) {
+                if (players.size < 2) {
+                    sender.sendMessage("${ChatColor.RED}Too few players")
+                    return true
+                }
+
+                val game = Game(main, Game.Options(timer), main.mapStorage[mapName]!!)
+                val listener = object: Listener {
+
+                    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+                    fun onInventoryClick(event: InventoryClickEvent) {
+                        if (event.whoClicked !in players) {
                             return
                         }
 
-                        val block = Material.matchMaterial(event.message)
-                        if (block == null) {
-                            event.player.sendMessage("${ChatColor.RED}Write block ID or name, please")
-                            return
+                        val block = event.currentItem.type
+
+                        try {
+                            game.joinPlayer(event.whoClicked as Player, block)
+                            event.whoClicked.sendMessage("${ChatColor.GREEN}Your block is $block")
+                            event.whoClicked.closeInventory()
+                        } catch (e: IllegalArgumentException) {
+                            event.whoClicked.sendMessage("${ChatColor.RED}${e.message}")
                         }
 
-                        if (!block.isBlock) {
-                            event.player.sendMessage("${ChatColor.RED}\"$block\" is not a block (try to add \"block\")")
-                            return
-                        }
+                        event.isCancelled = true
+                    }
 
-                        if (blocks.containsValue(block)) {
-                            event.player.sendMessage("${ChatColor.RED}This block is already busy")
-                            return
-                        }
-
-                        blocks[event.player] = block
-                        event.player.sendMessage("${ChatColor.GREEN}Your block is $block")
-
-                        if (blocks.size >= players.size) {
-                            players.forEach {
-                                it.sendMessage("Game starting")
-                            }
+                    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+                    fun onInventoryClose(event: InventoryCloseEvent) {
+                        if (event.player in players && event.player !in game.players) {
+                            event.player.sendMessage("${ChatColor.RED}You have been leaved the game")
+                            players.remove(event.player)
                         }
                     }
 
-                    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+                    @EventHandler(priority = EventPriority.MONITOR)
                     fun onPlayerQuit(event: PlayerQuitEvent) {
                         if (event.player in players) {
                             players.remove(event.player)
                         }
                     }
-                }, main)
+                }
+
+                main.server.pluginManager.registerEvents(listener, main)
 
                 object: BukkitRunnable() {
                     override fun run() {
-                        if (blocks.size < players.size) {
+                        if (game.players.size < players.size) {
                             return
                         }
 
-                        main.gameManager.startGame(Game(main, Game.Options(timer), blocks, main.mapStorage[mapName]!!))
-                        cancel()
+                        try {
+                            game.start()
+                            main.gameContainer.add(game)
+
+                            cancel()
+                            HandlerList.unregisterAll(listener)
+                        } catch (e: UnsupportedOperationException) {
+                            players.forEach {
+                                it.sendMessage("${ChatColor.RED}${e.message}")
+                            }
+                        }
+
+                        players.forEach {
+                            it.inventory.contents = emptyArray()
+                            it.sendMessage("Game starting")
+                        }
                     }
                 }.runTaskTimer(main, 0, 1)
 
                 return true
             }
+        },
+        "stuck" to object: PlayersTabExecutor(main.server) {
+
+            override fun onCommand(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): Boolean {
+                val args = cleanEmptyArgs(argsArray)
+
+                try {
+                    val (player, game) = parsePlayerArgument(main, sender, args)
+
+                    player.teleport(game.map.start)
+
+                    sender.sendMessage("Teleported to start")
+                } catch (e: IllegalArgumentException) {
+                    sender.sendMessage("${ChatColor.RED}${e.message}")
+                }
+
+                return true
+            }
+        },
+        "skip" to object: PlayersTabExecutor(main.server) {
+
+            override fun onCommand(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): Boolean {
+                val args = cleanEmptyArgs(argsArray)
+
+                try {
+                    val (_, game) = parsePlayerArgument(main, sender, args)
+
+                    game.skipCurrentState()
+
+                    sender.sendMessage("Game skipped to state ${game.state}")
+                } catch (e: IllegalArgumentException) {
+                    sender.sendMessage("${ChatColor.RED}${e.message}")
+                }
+
+                return true
+            }
+        },
+        "stop" to object: PlayersTabExecutor(main.server) {
+
+            override fun onCommand(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): Boolean {
+                val args = cleanEmptyArgs(argsArray)
+
+                try {
+                    val (_, game) = parsePlayerArgument(main, sender, args)
+
+                    game.stop()
+
+                    sender.sendMessage("Game stopped")
+                } catch (e: IllegalArgumentException) {
+                    sender.sendMessage("${ChatColor.RED}${e.message}")
+                }
+
+                return true
+            }
         }
-))
+)) {
+    companion object {
+        private fun parsePlayerArgument(main: Main, sender: CommandSender, args: Array<String>): Pair<Player, Game> {
+            val player = if (args.isEmpty()) run {
+                if (sender !is Player) {
+                    throw IllegalArgumentException("Sender is not player")
+                }
+
+                return@run sender as Player
+            } else {
+                main.server.getPlayerExact(args[0]) ?: throw IllegalArgumentException("Player not found")
+            }
+
+            val game = run {
+                for (game in main.gameContainer) {
+                    if (player in game.players) {
+                        return@run game
+                    }
+                }
+
+                throw IllegalArgumentException("Game with the player ${player.name} not found")
+            }
+
+            return player to game
+        }
+    }
+}

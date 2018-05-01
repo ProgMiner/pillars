@@ -12,7 +12,14 @@ open class MapsTabExecutor(
 ): NodeTabExecutor(listOf()) {
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): List<String> {
-        commands = mapStorage.keys.associate { Pair(it, child) }
+        val args = cleanEmptyArgs(argsArray)
+
+        commands = if (args.isEmpty()) {
+            mapStorage.keys.associate { it to child }
+        } else {
+            mapOf(args.first() to child)
+        }
+
         return super.onTabComplete(sender, command, alias, argsArray)
     }
 }

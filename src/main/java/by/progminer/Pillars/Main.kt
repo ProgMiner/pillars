@@ -20,7 +20,13 @@ class Main: JavaPlugin() {
     lateinit var mapStorage: MapStorage
         private set
 
-    val gameManager = GameManager()
+    var gameContainer = mutableSetOf<Game>()
+        private set
+        get() {
+            field = field.filter { it.state != Game.State.ENDED }.toMutableSet()
+
+            return field
+        }
 
     override fun onLoad() {
         // Register serializable classes
@@ -53,6 +59,10 @@ class Main: JavaPlugin() {
     }
 
     override fun onDisable() {
+        gameContainer.forEach {
+            it.stop()
+        }
+
         mapStorage.saveToFile(File(pluginDir, MAPS_FILE))
     }
 }

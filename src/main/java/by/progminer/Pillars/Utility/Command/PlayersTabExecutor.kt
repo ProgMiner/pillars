@@ -12,7 +12,14 @@ open class PlayersTabExecutor(
 ): NodeTabExecutor(listOf()) {
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, argsArray: Array<String>): List<String> {
-        commands = server.onlinePlayers.associate { Pair(it.name, child) }
+        val args = cleanEmptyArgs(argsArray)
+
+        commands = if (args.isEmpty()) {
+            server.onlinePlayers.associate { it.name to child }
+        } else {
+            mapOf(args.first() to child)
+        }
+
         return super.onTabComplete(sender, command, alias, argsArray)
     }
 }

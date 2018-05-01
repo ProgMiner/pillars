@@ -2,9 +2,7 @@ package by.progminer.Pillars
 
 import org.bukkit.Location
 import org.bukkit.configuration.serialization.ConfigurationSerializable
-import org.bukkit.configuration.serialization.SerializableAs
 
-@SerializableAs("Map")
 data class GameMap(
         val lobby: Location,
         val start: Location,

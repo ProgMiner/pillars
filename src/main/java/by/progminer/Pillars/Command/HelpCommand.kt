@@ -9,6 +9,8 @@ class HelpCommand(private val main: Main): NodeHelpDisplayer("help", mapOf(
         "game" to NodeHelpDisplayer(HelpDisplayer("Manages games", "/pillars game [<action>]"), mapOf(
                 "list" to HelpDisplayer("Displays the currently running games. If players are specified, looks for games with them", "/pillars game list [<players>]"),
                 "start" to HelpDisplayer("Starts the game with the specified players and the card (\"--\" for a random card)", "/pillars game start <map name|\"--\"> <timer> <players>"),
+                "stuck" to HelpDisplayer("Teleports specified player or sender to map start", "/pillars game stuck [<player>]"),
+                "skip" to HelpDisplayer("Skips the game with the specified player or sender", "/pillars game skip [<player>]"),
                 "stop" to HelpDisplayer("Stops the game with the specified player or sender", "/pillars game stop [<player>]")
         )),
         "map" to NodeHelpDisplayer(HelpDisplayer("Manages the plugin map storage", "/pillars map [<action>]"), mapOf(
