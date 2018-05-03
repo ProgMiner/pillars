@@ -1,10 +1,6 @@
 package by.progminer.Pillars
 
-import org.bukkit.Color
-import org.bukkit.Location
-import org.bukkit.Material
-import org.bukkit.ChatColor
-import org.bukkit.FireworkEffect
+import org.bukkit.*
 import org.bukkit.block.BlockState
 import org.bukkit.boss.BarColor
 import org.bukkit.boss.BarStyle
@@ -16,14 +12,15 @@ import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockDamageEvent
-import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.FoodLevelChangeEvent
 import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.inventory.InventoryType
 import org.bukkit.event.player.*
-import org.bukkit.event.vehicle.VehicleCollisionEvent
 import org.bukkit.scheduler.BukkitRunnable
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.*
 
 @Suppress("unused", "MemberVisibilityCanBePrivate")
@@ -47,7 +44,8 @@ class Game(
                 // Teleporting players to start point
                 player.teleport(map.start)
 
-                player.gameMode = org.bukkit.GameMode.SURVIVAL
+                // TODO Make gamemode configurable
+                player.gameMode = GameMode.SURVIVAL
                 player.canPickupItems = false
                 player.isCollidable = false
             }
@@ -55,7 +53,7 @@ class Game(
             // Setting timer for waiting
             timer = options.startDuration
         }, {
-            it.gameMode = org.bukkit.GameMode.SURVIVAL
+            it.gameMode = GameMode.SURVIVAL
             it.canPickupItems = false
             it.isCollidable = false
         }),
@@ -321,7 +319,9 @@ class Game(
     }
 
     fun stop() {
-        state = State.ENDED
+        while (state != State.ENDED) {
+            skipCurrentState()
+        }
     }
 
     fun joinPlayer(player: Player, block: Material) {
@@ -545,7 +545,10 @@ class Game(
             return
         }
 
-        event.isCancelled = true
+        // TODO Make gamemode configurable
+        if (event.newGameMode != GameMode.SURVIVAL) {
+            event.isCancelled = true
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -580,12 +583,13 @@ class Game(
 
         val timer = timer
         if (timer >= 0) {
-            val calendar = Calendar.getInstance()
-            calendar.timeInMillis = timer
+            val localTime = LocalTime.ofNanoOfDay(timer * 1000000)
 
-            // TODO Format time
+            // TODO Make format configurable
+            val formatter = DateTimeFormatter.ofPattern("mm:ss/SSS")
+
             bossBar.progress = 1 - timer.toDouble() / timerFull
-            bossBar.title = "${state.name} since ${calendar[Calendar.MINUTE]}:${calendar[Calendar.SECOND]}/${calendar[Calendar.MILLISECOND]}"
+            bossBar.title = "${state.name} since ${localTime.format(formatter)}"
 
             bossBar.color = when (bossBar.progress) {
                 in 0.0..0.35 ->

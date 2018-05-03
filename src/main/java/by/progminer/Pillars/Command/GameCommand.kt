@@ -104,32 +104,14 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
                     val player = main.server.getPlayerExact(it)
 
                     if (player != null) {
+                        main.gameContainer.forEach {
+                            if (player in it.players) {
+                                sender.sendMessage("${ChatColor.RED}Player ${player.name} already plays")
+                                return true
+                            }
+                        }
+
                         players.add(player)
-
-                        player.sendMessage("Select your block now")
-
-                        // TODO Make inventory configurable
-                        val inventory = main.server.createInventory(player, InventoryType.PLAYER, "Select your block now")
-                        inventory.contents = arrayOf(
-                                ItemStack(Material.WHITE_GLAZED_TERRACOTTA),
-                                ItemStack(Material.ORANGE_GLAZED_TERRACOTTA),
-                                ItemStack(Material.MAGENTA_GLAZED_TERRACOTTA),
-                                ItemStack(Material.LIGHT_BLUE_GLAZED_TERRACOTTA),
-                                ItemStack(Material.YELLOW_GLAZED_TERRACOTTA),
-                                ItemStack(Material.LIME_GLAZED_TERRACOTTA),
-                                ItemStack(Material.PINK_GLAZED_TERRACOTTA),
-                                ItemStack(Material.GRAY_GLAZED_TERRACOTTA),
-                                ItemStack(Material.SILVER_GLAZED_TERRACOTTA),
-                                ItemStack(Material.CYAN_GLAZED_TERRACOTTA),
-                                ItemStack(Material.PURPLE_GLAZED_TERRACOTTA),
-                                ItemStack(Material.BLUE_GLAZED_TERRACOTTA),
-                                ItemStack(Material.BROWN_GLAZED_TERRACOTTA),
-                                ItemStack(Material.GREEN_GLAZED_TERRACOTTA),
-                                ItemStack(Material.RED_GLAZED_TERRACOTTA),
-                                ItemStack(Material.BLACK_GLAZED_TERRACOTTA)
-                        )
-
-                        player.openInventory(inventory)
                     } else {
                         badPlayers.add(it)
                     }
@@ -139,18 +121,36 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
                     sender.sendMessage(badPlayers.joinToString(prefix = "${ChatColor.RED}Players not found: "))
                 }
 
-                main.gameContainer.forEach {
-                    players.forEach {player ->
-                        if (it.players.contains(player)) {
-                            sender.sendMessage("${ChatColor.RED}Player ${player.name} already plays")
-                            return true
-                        }
-                    }
-                }
-
                 if (players.size < 2) {
                     sender.sendMessage("${ChatColor.RED}Too few players")
                     return true
+                }
+
+                players.forEach { player ->
+                    player.sendMessage("Select your block now")
+
+                    // TODO Make inventory configurable
+                    val inventory = main.server.createInventory(player, InventoryType.PLAYER, "Select your block now")
+                    inventory.contents = arrayOf(
+                            ItemStack(Material.WHITE_GLAZED_TERRACOTTA),
+                            ItemStack(Material.ORANGE_GLAZED_TERRACOTTA),
+                            ItemStack(Material.MAGENTA_GLAZED_TERRACOTTA),
+                            ItemStack(Material.LIGHT_BLUE_GLAZED_TERRACOTTA),
+                            ItemStack(Material.YELLOW_GLAZED_TERRACOTTA),
+                            ItemStack(Material.LIME_GLAZED_TERRACOTTA),
+                            ItemStack(Material.PINK_GLAZED_TERRACOTTA),
+                            ItemStack(Material.GRAY_GLAZED_TERRACOTTA),
+                            ItemStack(Material.SILVER_GLAZED_TERRACOTTA),
+                            ItemStack(Material.CYAN_GLAZED_TERRACOTTA),
+                            ItemStack(Material.PURPLE_GLAZED_TERRACOTTA),
+                            ItemStack(Material.BLUE_GLAZED_TERRACOTTA),
+                            ItemStack(Material.BROWN_GLAZED_TERRACOTTA),
+                            ItemStack(Material.GREEN_GLAZED_TERRACOTTA),
+                            ItemStack(Material.RED_GLAZED_TERRACOTTA),
+                            ItemStack(Material.BLACK_GLAZED_TERRACOTTA)
+                    )
+
+                    player.openInventory(inventory)
                 }
 
                 val game = Game(main, Game.Options(timer), main.mapStorage[mapName]!!)
