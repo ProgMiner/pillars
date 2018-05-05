@@ -4,7 +4,6 @@ import by.progminer.Pillars.Game
 import by.progminer.Pillars.Main
 import by.progminer.Pillars.Utility.Command.*
 import org.bukkit.ChatColor
-import org.bukkit.GameMode
 import org.bukkit.Material
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
@@ -209,6 +208,10 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
                             players.forEach {
                                 it.sendMessage("${ChatColor.RED}${e.message}")
                             }
+
+                            cancel()
+                            HandlerList.unregisterAll(listener)
+                            return
                         }
 
                         players.forEach {

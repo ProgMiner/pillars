@@ -12,6 +12,7 @@ import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockDamageEvent
+import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.FoodLevelChangeEvent
 import org.bukkit.event.inventory.InventoryOpenEvent
@@ -20,7 +21,6 @@ import org.bukkit.event.player.*
 import org.bukkit.scheduler.BukkitRunnable
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import java.util.*
 
 @Suppress("unused", "MemberVisibilityCanBePrivate")
@@ -44,11 +44,13 @@ class Game(
                 // Teleporting players to start point
                 player.teleport(map.start)
 
-                // TODO Make gamemode configurable
                 player.gameMode = GameMode.SURVIVAL
                 player.canPickupItems = false
                 player.isCollidable = false
             }
+
+            // Showing the bossbar
+            bossBar.isVisible = true
 
             // Setting timer for waiting
             timer = options.startDuration
@@ -127,6 +129,8 @@ class Game(
         }, {
             _players.forEach { player ->
 
+                // TODO Taking all effects from player
+
                 // Teleporting players to pillars point
                 player.teleport(map.pillars)
 
@@ -146,7 +150,7 @@ class Game(
                     }
                 }
 
-                val sets = unsortedSets.toSortedMap(Comparator { a, b -> a - b })
+                val sets = unsortedSets.toSortedMap(Comparator { a, b -> b - a })
 
                 val ret = mutableListOf<String>()
                 sets.forEach { _, set ->
@@ -224,20 +228,21 @@ class Game(
             blocksLog.forEach { location, block ->
                 location.block.type = block.type
                 location.block.data = block.data.data
+                // TODO Update block
             }
-
-            bossBar.isVisible = false
 
             cancel()
             HandlerList.unregisterAll(this)
+
+            bossBar.isVisible = false
         })
     }
 
     data class Options(
-            val gameDuration: Long = 300000,
-            val startDuration: Long = 5000,
-            val endDuration: Long = 300000,
-            val blocksAmount: Int = 12
+            val gameDuration: Long = 300000, // duration of main game states,   default - 5 min
+            val startDuration: Long = 5000,  // delay between main game states, default - 5 sec
+            val endDuration: Long = 60000,   // duration of game ending,        default - 1 min
+            val blocksAmount: Int = 12       // amount of blocks,               default - 12 blocks
     )
 
     // Public variables
@@ -401,6 +406,10 @@ class Game(
         when (state) {
             State.HIDING_START, State.HIDING_END, State.SEARCH_START, State.PILLARS_START -> {}
 
+            State.HIDING -> if (placedBlocks[event.player.name]?.size ?: 0 < options.blocksAmount) {
+                return
+            }
+
             else ->
                 return
         }
@@ -472,6 +481,7 @@ class Game(
                         state != State.PILLARS && event.block.type == _blocks[event.player.name] ||
                         state == State.PILLARS && event.block.type != _blocks[event.player.name]
                 ) {
+                    // TODO Change pillars building mechanism
                     if (state == State.PILLARS && (
                             event.block.location.blockX != event.player.location.blockX ||
                             event.block.location.blockY != event.player.location.blockY - 1 ||
@@ -545,10 +555,7 @@ class Game(
             return
         }
 
-        // TODO Make gamemode configurable
-        if (event.newGameMode != GameMode.SURVIVAL) {
-            event.isCancelled = true
-        }
+        event.isCancelled = event.newGameMode != GameMode.SURVIVAL
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -561,19 +568,27 @@ class Game(
                 event.action == Action.LEFT_CLICK_BLOCK ||
                 event.action == Action.RIGHT_CLICK_BLOCK
         ) {
+            // TODO
             return
         }
 
         event.isCancelled = true
     }
 
+    // TODO Fix pictures breaking
+
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: EntityDamageEvent) {
-        if (event.entity !in _players) {
-            return
+        if (event.entity in _players) {
+            event.isCancelled = true
         }
+    }
 
-        event.isCancelled = true
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun on(event: EntityDamageByEntityEvent) {
+        if (event.damager in _players) {
+            event.isCancelled = true
+        }
     }
 
     // Overrides
@@ -604,14 +619,17 @@ class Game(
                 else ->
                     BarColor.WHITE
             }
-
-            bossBar.isVisible = true
         } else {
-            bossBar.isVisible = false
+            bossBar.progress = 1.0
+            bossBar.title = state.name
+
+            bossBar.color = BarColor.WHITE
         }
     }
 
     // Private methods
+
+    // TODO Remove onPlayerFreeze
 
     private fun <T> onPlayerFreeze(event: T) where
             T: Cancellable,
