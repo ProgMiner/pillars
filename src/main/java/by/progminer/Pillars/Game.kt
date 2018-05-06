@@ -1,10 +1,8 @@
 package by.progminer.Pillars
 
 import org.bukkit.*
-import org.bukkit.block.BlockState
 import org.bukkit.boss.BarColor
 import org.bukkit.boss.BarStyle
-import org.bukkit.inventory.ItemStack
 import org.bukkit.entity.Player
 import org.bukkit.entity.Firework
 import org.bukkit.event.*
@@ -18,6 +16,7 @@ import org.bukkit.event.entity.FoodLevelChangeEvent
 import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.inventory.InventoryType
 import org.bukkit.event.player.*
+import org.bukkit.material.MaterialData
 import org.bukkit.scheduler.BukkitRunnable
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -82,7 +81,7 @@ class Game(
                 }
 
                 // Giving blocks
-                player.inventory.addItem(ItemStack(blocks[player.name]!!, options.blocksAmount))
+                player.inventory.addItem(blocks[player.name]!!.toItemStack(options.blocksAmount))
             }
 
             // Setting timer for game
@@ -226,9 +225,9 @@ class Game(
             }
 
             blocksLog.forEach { location, block ->
-                location.block.type = block.type
-                location.block.data = block.data.data
-                // TODO Update block
+                location.block.type = block.itemType
+                location.block.state.data = block
+                location.block.state.update(true, true)
             }
 
             cancel()
@@ -255,7 +254,7 @@ class Game(
     val players: Set<Player>
         get() = _players.toSet()
 
-    val blocks: Map<String, Material>
+    val blocks: Map<String, MaterialData>
         get() = _blocks.toMap()
 
     val offlinePlayers: Set<String>
@@ -287,11 +286,11 @@ class Game(
 
     private val placedBlocks = mutableMapOf<String, MutableSet<Location>>()
 
-    private val blocksLog = mutableMapOf<Location, BlockState>()
+    private val blocksLog = mutableMapOf<Location, MaterialData>()
 
     private val _collectedBlocks = mutableMapOf<String, Int>()
 
-    private val _blocks = mutableMapOf<String, Material>()
+    private val _blocks = mutableMapOf<String, MaterialData>()
 
     private val _offlinePlayers = mutableSetOf<String>()
 
@@ -329,7 +328,7 @@ class Game(
         }
     }
 
-    fun joinPlayer(player: Player, block: Material) {
+    fun joinPlayer(player: Player, block: MaterialData) {
         if (!player.isOnline) {
             throw IllegalArgumentException("Player is not online")
         }
@@ -340,7 +339,7 @@ class Game(
             }
         }
 
-        if (!block.isBlock || !block.isSolid || block.hasGravity()) {
+        if (!block.itemType.isBlock || !block.itemType.isSolid || block.itemType.hasGravity()) {
             throw IllegalArgumentException("Block must be solid non-falling block")
         }
 
@@ -403,31 +402,23 @@ class Game(
             return
         }
 
-        when (state) {
-            State.HIDING_START, State.HIDING_END, State.SEARCH_START, State.PILLARS_START -> {}
+        if (state !in arrayOf(State.HIDING_START, State.HIDING_END, State.SEARCH_START, State.PILLARS_START)) {
+            return
+        }
 
-            State.HIDING -> if (placedBlocks[event.player.name]?.size ?: 0 < options.blocksAmount) {
-                return
-            }
-
-            else ->
-                return
+        if (state == State.HIDING && placedBlocks[event.player.name]?.size ?: 0 < options.blocksAmount) {
+            return
         }
 
         if (
                 event.from.blockX != event.to.blockX ||
                 event.from.blockZ != event.to.blockZ
         ) {
-            event.player.teleport(Location(
-                    event.from.world,
-                    event.from.x,
-                    event.to.y,
-                    event.from.z,
-                    event.to.yaw,
-                    event.to.pitch
-            ))
+            event.isCancelled = true
         }
     }
+
+    // TODO Make blocks breaking like naturally
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: BlockDamageEvent) {
@@ -436,11 +427,9 @@ class Game(
         }
 
         when (state) {
-            State.HIDING, State.PILLARS ->
+            State.HIDING ->
                 if (event.block.location in placedBlocks[event.player.name] ?: emptySet<Location>()) {
                     placedBlocks[event.player.name]!!.remove(event.block.location)
-                    event.player.inventory.addItem(ItemStack(event.block.type))
-                    event.block.type = Material.AIR
                 } else {
                     event.isCancelled = true
                 }
@@ -448,24 +437,32 @@ class Game(
             State.SEARCH -> {
                 event.isCancelled = true
 
-                if (event.block.type == _blocks[event.player.name]) {
-                    return
-                }
+                for ((player, blocks) in placedBlocks) {
+                    if (player == event.player.name) {
+                        continue
+                    }
 
-                for ((_, blocks) in placedBlocks) {
                     if (event.block.location in blocks) {
                         _collectedBlocks[event.player.name] = _collectedBlocks[event.player.name]!! + 1
 
-                        event.player.inventory.addItem(ItemStack(event.block.type))
-                        event.block.type = Material.AIR
                         event.isCancelled = false
                         break
                     }
                 }
             }
 
+            State.PILLARS ->
+                event.isCancelled = true
+
             else ->
                 onPlayerFreeze(event, event.player)
+        }
+
+        if (!event.isCancelled) {
+            event.player.inventory.addItem(event.block.state.data.toItemStack(1))
+            event.block.type = Material.AIR
+
+            blocksLog[event.block.location] = event.block.state.data
         }
     }
 
@@ -476,26 +473,41 @@ class Game(
         }
 
         when (state) {
-            State.HIDING, State.HIDING_END, State.SEARCH, State.PILLARS ->
-                if (
-                        state != State.PILLARS && event.block.type == _blocks[event.player.name] ||
-                        state == State.PILLARS && event.block.type != _blocks[event.player.name]
-                ) {
-                    // TODO Change pillars building mechanism
-                    if (state == State.PILLARS && (
-                            event.block.location.blockX != event.player.location.blockX ||
-                            event.block.location.blockY != event.player.location.blockY - 1 ||
-                            event.block.location.blockZ != event.player.location.blockZ
-                    )) {
+            State.HIDING, State.HIDING_END, State.SEARCH -> {
+                if (event.block.type != _blocks[event.player.name]?.itemType) {
+                    event.isCancelled = true
+                    return
+                }
+
+                if ((state == State.HIDING) && (placedBlocks[event.player.name]?.size ?: 0 >= options.blocksAmount)) {
+                    event.isCancelled = true
+                    return
+                }
+            }
+
+            State.PILLARS ->
+                if (event.block.type != _blocks[event.player.name]?.itemType) {
+                    // TODO Fix pillars building mechanism
+
+                    // Blocks in pillars can be placed only under the player
+                    if (
+                            event.block.x != event.player.location.blockX ||
+                            event.block.y >= event.player.location.blockY ||
+                            event.block.z != event.player.location.blockZ
+                    ) {
                         event.isCancelled = true
                         return
                     }
 
-                    if (event.player.name !in placedBlocks.keys) {
-                        placedBlocks[event.player.name] = mutableSetOf()
+                    // Blocks in pillars can be placed only on previous block of this pillar
+                    val prevBlock = placedBlocks[event.player.name]?.firstOrNull() ?: event.player.location.add(.0, -1.0, .0)
+                    if (
+                            event.block.x != prevBlock.blockX ||
+                            event.block.z != prevBlock.blockZ
+                    ) {
+                        event.isCancelled = true
+                        return
                     }
-
-                    placedBlocks[event.player.name]!!.add(event.block.location)
                 } else {
                     event.isCancelled = true
                 }
@@ -505,37 +517,35 @@ class Game(
         }
 
         if (!event.isCancelled) {
-            blocksLog[event.block.location] = event.blockReplacedState
+            if (event.player.name !in placedBlocks.keys) {
+                placedBlocks[event.player.name] = mutableSetOf()
+            }
+
+            placedBlocks[event.player.name]!!.add(event.block.location)
+
+            blocksLog[event.block.location] = event.blockReplacedState.data
         }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: BlockBreakEvent) {
-        if (event.player !in _players) {
-            return
+        if (event.player in _players) {
+            event.isDropItems = false
         }
-
-        blocksLog[event.block.location] = event.block.state
-
-        event.isDropItems = false
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: PlayerDropItemEvent) {
-        if (event.player !in _players) {
-            return
+        if (event.player in _players) {
+            event.isCancelled = true
         }
-
-        event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: FoodLevelChangeEvent) {
-        if (event.entity !in _players) {
-            return
+        if (event.entity in _players) {
+            event.isCancelled = true
         }
-
-        event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -552,10 +562,8 @@ class Game(
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: PlayerGameModeChangeEvent) {
         if (event.player !in _players) {
-            return
+            event.isCancelled = event.newGameMode != GameMode.SURVIVAL
         }
-
-        event.isCancelled = event.newGameMode != GameMode.SURVIVAL
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -568,7 +576,7 @@ class Game(
                 event.action == Action.LEFT_CLICK_BLOCK ||
                 event.action == Action.RIGHT_CLICK_BLOCK
         ) {
-            // TODO
+            // TODO Add more cases
             return
         }
 

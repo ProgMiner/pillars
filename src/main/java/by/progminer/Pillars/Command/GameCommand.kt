@@ -161,7 +161,7 @@ class GameCommand(private val main: Main): NodeTabExecutor(mapOf(
                             return
                         }
 
-                        val block = event.currentItem.type
+                        val block = event.currentItem.data
 
                         try {
                             game.joinPlayer(event.whoClicked as Player, block)
