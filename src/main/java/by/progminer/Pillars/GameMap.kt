@@ -3,6 +3,9 @@ package by.progminer.Pillars
 import org.bukkit.Location
 import org.bukkit.configuration.serialization.ConfigurationSerializable
 
+// TODO Add more points
+// TODO Make builder
+
 data class GameMap(
         val lobby: Location,
         val start: Location,
