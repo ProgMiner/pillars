@@ -561,7 +561,7 @@ class Game(
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun on(event: PlayerGameModeChangeEvent) {
-        if (event.player !in _players) {
+        if (event.player in _players) {
             event.isCancelled = event.newGameMode != GameMode.SURVIVAL
         }
     }
